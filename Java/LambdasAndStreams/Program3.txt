@@ -1,0 +1,8 @@
+83,Electric Sander,7,57.98
+24,Power Saw,18,99.99
+7,Sledge Hammer,11,21.50
+77,Hammer,76,11.99
+39,Lawn Mower,3,79.50
+68,Screwdriver,106,6.99
+56,Jig Saw,21,11.00
+3,Wrench,34,7.50
