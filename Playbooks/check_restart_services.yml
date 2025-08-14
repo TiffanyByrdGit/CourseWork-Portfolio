@@ -1,0 +1,83 @@
+---
+# check_restart_services.yml
+# Purpose: Verify critical services are running; start & enable them if not.
+
+- name: Check & auto-start critical services
+  hosts: all
+  become: true
+  gather_facts: true  # needed for ansible_service_mgr
+
+  vars:
+    # List all service names you consider "critical".
+    critical_services:
+      - apache2
+      - httpd
+      - mysql
+      - mariadb
+      - openvpn
+      - openvpn-server@server
+      - openvpn-client@client
+      - strongswan
+      - ipsec
+      - vpn
+      - ssh
+      - chronyd
+      - chrony
+      - ntp
+
+  pre_tasks:
+    - name: Collect service facts
+      ansible.builtin.service_facts:
+
+    - name: Compute services that exist on this host
+      ansible.builtin.set_fact:
+        present_services: >-
+          {{ critical_services
+             | select('in', (ansible_facts.services.keys() | list))
+             | list }}
+
+    - name: Show which critical services are missing on this host (FYI)
+      ansible.builtin.debug:
+        msg: >-
+          Missing here: {{
+            (critical_services | difference(present_services)) | default([]) }}
+      when: (critical_services | difference(present_services)) | length > 0
+
+  tasks:
+    - name: Ensure services are enabled and running (systemd)
+      when: ansible_service_mgr == 'systemd'
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop: "{{ present_services }}"
+      register: systemd_changes
+
+    - name: Ensure services are enabled and running (SysVinit/other)
+      when: ansible_service_mgr != 'systemd'
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop: "{{ present_services }}"
+      register: service_changes
+
+  post_tasks:
+    - name: Summarize actions taken
+      ansible.builtin.debug:
+        var: _summary
+      vars:
+        _started_changed: >-
+          {{
+            ((systemd_changes.results | default([])) +
+             (service_changes.results | default([])))
+            | selectattr('changed', 'equalto', true)
+            | map(attribute='item') | list
+          }}
+        _summary: |
+          Host: {{ inventory_hostname }}
+          Service manager: {{ ansible_service_mgr }}
+          Present services: {{ present_services | default([]) }}
+          Started/Enabled (changed this run): {{ _started_changed }}
+
+

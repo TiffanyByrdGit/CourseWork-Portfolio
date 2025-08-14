@@ -1,0 +1,136 @@
+# Enforce DNS settings across Linux hosts.
+# Notes:
+# - If systemd-resolved is active, this playbook configures a drop-in and reloads it.
+# - Otherwise, it manages /etc/resolv.conf directly (with backup).
+# - Idempotent: only changes files when content differs.
+
+- name: Update DNS settings on all hosts
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    # ==== Customize these ====
+    dns_servers:
+      - 1.1.1.1
+      - 9.9.9.9
+    search_domains:
+      - corp.example.com
+      - example.com
+    resolver_options:        
+      timeout: 2
+      attempts: 2
+      rotate: true
+      single-request: true
+
+    # If NetworkManager keeps overwriting resolv.conf, set this true to tell NM to leave DNS alone.
+    disable_nm_dns_overwrite: false
+
+  pre_tasks:
+    - name: Detect if systemd-resolved service is present
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: started
+      check_mode: true
+      register: _resolved_probe
+      failed_when: false
+      changed_when: false
+
+    - name: Determine if systemd-resolved is active
+      ansible.builtin.set_fact:
+        use_systemd_resolved: "{{ _resolved_probe.status is defined and _resolved_probe.status.LoadState == 'loaded' }}"
+
+  tasks:
+    - name: (Optional) Prevent NetworkManager overwriting resolv.conf
+      when: disable_nm_dns_overwrite | bool
+      block:
+        - name: Ensure NM DNS override config exists
+          ansible.builtin.copy:
+            dest: /etc/NetworkManager/conf.d/90-dns-none.conf
+            owner: root
+            group: root
+            mode: '0644'
+            content: |
+              [main]
+              dns=none
+          notify: restart NetworkManager
+
+        - name: Ensure resolv.conf is not a symlink to NM or systemd (only if we manage it directly)
+          when: not use_systemd_resolved
+          ansible.builtin.file:
+            path: /etc/resolv.conf
+            state: file
+            owner: root
+            group: root
+            mode: '0644'
+
+    # ---------- systemd-resolved path ----------
+    - name: Create drop-in directory for systemd-resolved
+      when: use_systemd_resolved
+      ansible.builtin.file:
+        path: /etc/systemd/resolved.conf.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Configure DNS via systemd-resolved drop-in
+      when: use_systemd_resolved
+      ansible.builtin.copy:
+        dest: /etc/systemd/resolved.conf.d/99-dns.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Resolve]
+          DNS={{ dns_servers | join(' ') }}
+          FallbackDNS=
+          Domains={{ search_domains | join(' ') }}
+          {{ '# Options below only apply to glibc resolv.conf readers, not directly in resolved; kept for doc parity' }}
+      notify: reload systemd-resolved
+
+    - name: Ensure /etc/resolv.conf points to systemd-resolved (optional best practice)
+      when: use_systemd_resolved
+      ansible.builtin.file:
+        src: /run/systemd/resolve/stub-resolv.conf
+        dest: /etc/resolv.conf
+        state: link
+      ignore_errors: true   # Some distros use /run/systemd/resolve/resolv.conf; ignore if not present
+
+    # ---------- direct /etc/resolv.conf path ----------
+    - name: Build resolv.conf content (direct management)
+      when: not use_systemd_resolved
+      ansible.builtin.set_fact:
+        _resolv_conf_block: |
+          # Managed by Ansible - update_dns_settings.yml
+          {{ (search_domains | length) > 0 | ternary('search ' ~ (search_domains | join(' ')), '') }}
+          {% for s in dns_servers %}
+          nameserver {{ s }}
+          {% endfor %}
+          {% for k, v in resolver_options.items() %}
+          options {{ k }}{{ v is boolean and v or v is number or v is string | ternary('=' ~ v, '') }}
+          {% endfor %}
+
+    - name: Write /etc/resolv.conf with backup
+      when: not use_systemd_resolved
+      ansible.builtin.blockinfile:
+        path: /etc/resolv.conf
+        block: "{{ _resolv_conf_block | trim }}"
+        create: true
+        backup: true
+        owner: root
+        group: root
+        mode: '0644'
+        marker: "# {mark} ANSIBLE MANAGED DNS BLOCK"
+
+  handlers:
+    - name: reload systemd-resolved
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: restarted
+        daemon_reload: true
+
+    - name: restart NetworkManager
+      ansible.builtin.systemd:
+        name: NetworkManager
+        state: restarted
