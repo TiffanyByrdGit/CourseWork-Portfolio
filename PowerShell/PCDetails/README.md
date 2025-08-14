@@ -1,6 +1,6 @@
 
 
-# PCDetails.ps1 – PC Inventory Script
+# PCDetails.ps1 – PC Details Script
 
 ## Overview
 This PowerShell script collects detailed information about a Windows computer, including:
