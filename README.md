@@ -6,7 +6,7 @@ A portfolio of hands-on coursework in programming, scripting, and system configu
 - **[Python](./Python/)**  
   - **Machine Learning:** Data cleaning, model training, and model evaluation.  
   - **SOC Scripts:** Phishing and URL analysis scripts.
-- **[PowerShell Tutorials](./PowerShell/README.md)** – Step-by-step scripts with screenshots and usage guides.
+- **[PowerShell Tutorials](./PowerShell/)** – Step-by-step scripts with screenshots and usage guides.
   - **PC Inventory Script:** Collect system details (hardware, OS, installed updates) and export to file.  
   - **Log Cleanup Script:** Automatically find and remove old log files.  
   - **Network Diagnostics Script:** Test connectivity, DNS resolution, and network latency.  
